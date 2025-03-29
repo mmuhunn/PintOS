@@ -147,12 +147,10 @@ thread_tick (void)
 void
 thread_sleep (int64_t wake_up_time){
   struct thread *current = thread_current();
-  enum intr_level old_level;
+  enum intr_level old_level = intr_disable();
 
   ASSERT (!intr_context ());
-  ASSERT (intr_get_level () == INTR_ON);
 
-  old_level = intr_disable();
   current -> wake_up_time = wake_up_time;
   list_push_back (&sleep_list, &current -> elem);
   thread_block();
@@ -167,7 +165,7 @@ thread_wake_up (int64_t current_ticks){
     struct thread *t = list_entry (e, struct thread, elem);
     if(t -> wake_up_time <= current_ticks) {
       e = list_remove(e);
-      thread_unblok(t);
+      thread_unblock(t);
     } else {
       e = list_next(e);
     }
