@@ -58,6 +58,9 @@ sema_init (struct semaphore *sema, unsigned value)
    interrupts disabled, but if it sleeps then the next scheduled
    thread will probably turn interrupts back on. */
 void
+/*
+semaphore 0 means all resource using, so input current thread in waiters by priority.
+and convert to block.*/
 sema_down (struct semaphore *sema) 
 {
   enum intr_level old_level;
@@ -113,11 +116,23 @@ sema_up (struct semaphore *sema)
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters)) 
-    thread_unblock (list_entry (list_pop_front (&sema->waiters),
-                                struct thread, elem));
-  sema->value++;
-  intr_set_level (old_level);
+  if (!list_empty (&sema->waiters)) {
+    //dh.sort waiters by priority
+    list_sort(&sema -> waiters, compare_priority, NULL);
+    //dh. awake the highest thread;
+    struct thread *t = list_entry(list_pop_front(&sema->waiters), struct thread, elem);
+    thread_unblock(t);
+  }
+  sema -> value++;
+
+  // dh. higher thread in ready_list, yield
+  if(!intr_context() && !list_empty(&ready_list)) {
+    struct thread *high = list_entry(list_front(&ready_list), struct thread, elem);
+    if(high->priority > thread_current()->priority) {
+      thread_yield();
+    }
+    intr_set_level(old_level);
+  }
 }
 
 static void sema_test_helper (void *sema_);
@@ -295,10 +310,13 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   
   sema_init (&waiter.semaphore, 0);
-  list_push_back (&cond->waiters, &waiter.elem);
+  waiter.priority = thread_current()->priority; //dh. save priority number of current in waiter
+  list_insert_ordered(&cond -> waiters, &waiter.elem, cond_sema_priority_compare, NULL);//dh. put in by priority
+
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);
+  
 }
 
 /* If any threads are waiting on COND (protected by LOCK), then
@@ -316,9 +334,13 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
 
-  if (!list_empty (&cond->waiters)) 
-    sema_up (&list_entry (list_pop_front (&cond->waiters),
-                          struct semaphore_elem, elem)->semaphore);
+  if (!list_empty (&cond->waiters)) {
+    // dh. sort waiters in order of priority
+    list_sort(&cond -> waiters, cond_sema_priority_compare, NULL);
+    //dh. wake up the highest priority wiater
+    struct semaphore_elem *sema_elem = list_entry(list_pop_front(%cond->waiters), struct semaphore_elem, elem);
+    sema_up(&sema_elem -> semaphore);
+  }
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
@@ -335,4 +357,14 @@ cond_broadcast (struct condition *cond, struct lock *lock)
 
   while (!list_empty (&cond->waiters))
     cond_signal (cond, lock);
+}
+
+static bool
+/*dh. compare function for sorting condition smea priority in waiters*/
+cond_smea_priority_compare(const struct list_elem *a,
+                          const struct list_elem *b,
+                          void *aux UNUSED) {
+  const struct semaphore_elem *sa = list_entry(a, struct semaphore_elem, elem);
+  const struct semaphore_elem *sb = list_entry(b, struct semaphore_elem, elem);
+  return sa -> priority > sb -> priority;
 }
