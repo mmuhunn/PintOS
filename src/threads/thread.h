@@ -90,6 +90,10 @@ struct thread
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
 
+    int64_t wake_up_tick;              /* Time at which thread should wake up */ //modified(add the field)
+    
+    int init_priority; //modified #2
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
@@ -99,8 +103,13 @@ struct thread
 #endif
 
     /* Owned by thread.c. */
-    int64_t wake_up_time;               /*for alarm*/
     unsigned magic;                     /* Detects stack overflow. */
+
+    struct lock *wait_on_lock;               /* The lock the thread is waiting on (for donation) */ //modified #2
+
+    //modified #2
+    struct list donations;                  /* List of threads that donated to this thread */
+    struct list_elem donation_elem;         /* List element for use in other thread's donation list */
   };
 
 /* If false (default), use round-robin scheduler.
@@ -113,9 +122,6 @@ void thread_start (void);
 
 void thread_tick (void);
 void thread_print_stats (void);
-
-void thread_sleep (int64_t wake_up_time);
-void thread_wake_up (int64_t current_ticks);
 
 typedef void thread_func (void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
@@ -142,4 +148,22 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+void thread_sleep(int64_t wake_up_tick); //modified
+void thread_wakeup(int64_t current_tick);
+bool thread_compare_wake_up_tick(const struct list_elem *a,
+                                 const struct list_elem *b,
+                                 void *aux);
+/* List of sleeping threads. */
+extern struct list sleep_list; //modified(add the struct)
+
+/* threads/thread.h */ //modified #2(add the struct)
+
+struct lock *wait_on_lock;               /* The lock the thread is waiting on (for donation) */
+struct list donations;                   /* List of threads that donated their priority */
+struct list_elem donation_elem;          /* List element for donation list */
+
 #endif /* threads/thread.h */
+
+//modified #2
+void donate_priority(void);
+void thread_reset_priority(void);
