@@ -88,7 +88,10 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int init_priotiry //dh. Initial Priority.
+    int init_priority; //dh. Initial Priority.
+    struct lock *wait_on_lock; //dh
+    struct list donations; //dh. thread list
+    struct list_elem donation_elem; //dh.
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
@@ -144,3 +147,4 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 #endif /* threads/thread.h */
+extern struct list ready_list;

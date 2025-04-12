@@ -41,6 +41,17 @@
 
    - up or "V": increment the value (and wake up one waiting
      thread, if any). */
+
+
+extern struct list ready_list;
+
+bool compare_priority(const struct list_elem *a,
+                           const struct list_elem *b,
+                           void *aux UNUSED);     
+void donate_priority(void);
+void refresh_priority(void);
+static bool cond_sema_priority_compare(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+
 void
 sema_init (struct semaphore *sema, unsigned value) 
 {
@@ -207,12 +218,25 @@ lock_init (struct lock *lock)
 void
 lock_acquire (struct lock *lock)
 {
+  struct thread *cur = thread_current(); //dh. define current thread
+
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  if(lock->holder){
+    //dh. show current thread waiting lock
+    cur->wait_on_lock = lock;
+    //dh.
+    donate_priority();
+    //dh. Add current thread in lock owner's donation list
+    list_insert_ordered(&lock->holder->donations, &cur->donation_elem, compare_priority, NULL);
+  }
+  //dh. ask lock
   sema_down (&lock->semaphore);
-  lock->holder = thread_current ();
+  //dh. init wait_on_lock
+  cur->wait_on_lock = NULL;
+  lock->holder = cur;
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -245,9 +269,23 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
+  // dh. remove elem from donations
+  struct list_elem *e = list_begin(&thread_current()->donations);
+  while (e != list_end(&thread_current()->donations)) {
+    struct thread *t = list_entry(e, struct thread, donation_elem);
+    if (t->wait_on_lock == lock) {
+      e = list_remove(e);  //dh. move to next elem
+    } else {
+      e = list_next(e);
+    }
+  }
 
+  // dh. recalculate
+  refresh_priority();
+
+  // dh. return lock
   lock->holder = NULL;
-  sema_up (&lock->semaphore);
+  sema_up(&lock->semaphore);
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -266,6 +304,7 @@ struct semaphore_elem
   {
     struct list_elem elem;              /* List element. */
     struct semaphore semaphore;         /* This semaphore. */
+    int priority;
   };
 
 /* Initializes condition variable COND.  A condition variable
@@ -338,7 +377,7 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
     // dh. sort waiters in order of priority
     list_sort(&cond -> waiters, cond_sema_priority_compare, NULL);
     //dh. wake up the highest priority wiater
-    struct semaphore_elem *sema_elem = list_entry(list_pop_front(%cond->waiters), struct semaphore_elem, elem);
+    struct semaphore_elem *sema_elem = list_entry(list_pop_front(&cond->waiters), struct semaphore_elem, elem);
     sema_up(&sema_elem -> semaphore);
   }
 }
@@ -361,7 +400,7 @@ cond_broadcast (struct condition *cond, struct lock *lock)
 
 static bool
 /*dh. compare function for sorting condition smea priority in waiters*/
-cond_smea_priority_compare(const struct list_elem *a,
+cond_sema_priority_compare(const struct list_elem *a,
                           const struct list_elem *b,
                           void *aux UNUSED) {
   const struct semaphore_elem *sa = list_entry(a, struct semaphore_elem, elem);

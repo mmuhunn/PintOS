@@ -22,7 +22,7 @@
 
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
-static struct list ready_list;
+struct list ready_list;
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -62,6 +62,8 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
+bool compare_wake_time(const struct list_elem *a, const struct list_elem *b, void *aux); //dh.
+bool compare_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);//dh.
 
 static void kernel_thread (thread_func *, void *aux);
 
@@ -73,6 +75,8 @@ static bool is_thread (struct thread *) UNUSED;
 static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
+void donate_priority(void);
+void refresh_priority(void);
 static tid_t allocate_tid (void);
 
 /* Initializes the threading system by transforming the code
@@ -146,30 +150,40 @@ thread_tick (void)
 /*dhdhdhdhdhdhdhdhdhdhdhdhd*/
 void
 thread_sleep (int64_t wake_up_time){
-  struct thread *current = thread_current();
+  printf("[DEBUG] thread_sleep called, wake_up_time = %lld\n", wake_up_time);
   enum intr_level old_level = intr_disable();
+  struct thread *current = thread_current();
 
   ASSERT (!intr_context ());
 
   current -> wake_up_time = wake_up_time;
-  list_push_back (&sleep_list, &current -> elem);
+  list_insert_ordered(&sleep_list, &current->elem, compare_wake_time, NULL);//dh. use sort
   thread_block();
   intr_set_level(old_level);
 }
 /*dhdhdhdhdhdhdhdhdhdhd*/
 void
 thread_wake_up (int64_t current_ticks){
+  printf("[wake_up] current_ticks = %lld\n", current_ticks);
   struct list_elem *e = list_begin (&sleep_list);
 
   while(e!=list_end(&sleep_list)){
     struct thread *t = list_entry (e, struct thread, elem);
     if(t -> wake_up_time <= current_ticks) {
-      e = list_remove(e);
+      struct list_elem *next = list_remove(e);
       thread_unblock(t);
+      e = next;
     } else {
-      e = list_next(e);
+      break;
     }
   }
+}
+
+/*dh. */
+bool compare_wake_time(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+  struct thread *ta = list_entry(a, struct thread, elem);
+  struct thread *tb = list_entry(b, struct thread, elem);
+  return ta->wake_up_time < tb->wake_up_time;
 }
 /* Prints thread statistics. */
 void
@@ -256,6 +270,7 @@ thread_create (const char *name, int priority,
 void
 thread_block (void) 
 {
+  printf("[debug] thread_block: %s\n", thread_current()->name);
   ASSERT (!intr_context ());
   ASSERT (intr_get_level () == INTR_OFF);
 
@@ -284,6 +299,7 @@ thread_unblock (struct thread *t)
   /*dh. ready_list inputed by priority*/
   t->status = THREAD_READY;
   intr_set_level (old_level);
+  printf("[debug] thread_unblock: %s\n", t->name);
 }
 
 /* Returns the name of the running thread. */
@@ -374,22 +390,66 @@ thread_foreach (thread_action_func *func, void *aux)
       func (t, aux);
     }
 }
+/*
+dh. Current thread donates its priority to lock owner
+*/
+#define DONATION_DEPTH_LIMIT 8
+
+void
+donate_priority(void) {
+  struct thread *cur = thread_current();
+  struct lock *lock = cur->wait_on_lock;
+  int depth = 0;
+
+  while (lock && depth < DONATION_DEPTH_LIMIT) {
+    if (!lock->holder)
+      break;
+
+    struct thread *holder = lock->holder;
+
+    if (holder->priority < cur->priority) {
+      holder->priority = cur->priority;
+    }
+
+    // dh. continue donation in next step
+    cur = holder;
+    lock = cur->wait_on_lock;
+    depth++;
+  }
+}
+
+void
+refresh_priority(void) {
+  struct thread *cur = thread_current();
+  //dh. Restore the thread's priority to its original value
+  cur->priority = cur->init_priority;
+  /*
+  dh. if there are any donated priorities, update current priority to highest among them*/
+  if (!list_empty(&cur->donations)) {
+    struct thread *donor = list_entry(list_front(&cur->donations), struct thread, donation_elem);
+    if (donor->priority > cur->priority) {
+      cur->priority = donor->priority;
+    }
+  }
+}
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
-thread_set_priority (int new_priority) 
+thread_set_priority(int new_priority) 
 {
   struct thread *cur = thread_current();
-  cur -> init_priority = new_priority; // dh. renew init_priority
-  cur -> priority = new_priority; //dh. renew current priority
+  cur->init_priority = new_priority;// dh. renew init_priority
 
-  /*dh. if there's higher priority thread in ready_list, yield!*/
+  refresh_priority();// dh. apply donation-aware priority
+
+  /* dh. if there's higher priority thread in ready_list, yield! */
   if (!list_empty(&ready_list)) {
-    struct thread *high = list_entry(list_front(&ready_list)), struct thread, elem);
-    if(high -> priority > cur -> priority)
-    thread_yield();
+    struct thread *high = list_entry(list_front(&ready_list), struct thread, elem);
+    if (high->priority > cur->priority)
+      thread_yield();
   }
 }
+
 
 /* Returns the current thread's priority. */
 int
@@ -493,15 +553,16 @@ running_thread (void)
 }
 
 /* Returns true if T appears to point to a valid thread. */
-static bool
+bool
 compare_priority(
   const struct list_elem *a,
   const struct list_elem *b,
   void *aux UNUSED) {
     return list_entry(a, struct thread, elem) -> priority >
     list_entry(b, struct thread, elem)->priority;
-  }
+}
 
+static bool
 is_thread (struct thread *t)
 {
   return t != NULL && t->magic == THREAD_MAGIC;
