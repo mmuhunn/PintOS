@@ -48,4 +48,9 @@ void cond_broadcast (struct condition *, struct lock *);
    reference guide for more information.*/
 #define barrier() asm volatile ("" : : : "memory")
 
+/* ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY */
+bool  sema_compare_priority (const struct list_elem *, const struct list_elem *, void *);
+/* ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY */
+
 #endif /* threads/synch.h */
+
