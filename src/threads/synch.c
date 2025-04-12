@@ -256,7 +256,7 @@ lock_try_acquire (struct lock *lock)
    handler. */
 
 
-=======
+
    /*modified #3*/
    void
    lock_release (struct lock *lock) 
@@ -272,7 +272,7 @@ lock_try_acquire (struct lock *lock)
      lock->holder = NULL;
      sema_up (&lock->semaphore);
    }
->>>>>>> Perfect complete Project1
+
 
 /* Returns true if the current thread holds LOCK, false
    otherwise.  (Note that testing whether some other thread holds
