@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "fixed_point.h" //modified #3
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -110,12 +111,19 @@ struct thread
     /* Owned by thread.c. */
     int64_t wake_up_time;               /*for alarm*/
     unsigned magic;                     /* Detects stack overflow. */
+
+     /* MLFQ Scheduling */ //modified #3
+     int nice;                  /* Niceness value (-20 to 20) */
+     fixed_t recent_cpu;        /* CPU usage measured for MLFQ */
+ 
   };
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+
+extern fixed_t load_avg;
 
 void thread_init (void);
 void thread_start (void);
@@ -153,11 +161,17 @@ int thread_get_load_avg (void);
 
 /* ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY */
 void thread_test_preemption (void);
-bool thread_compare_priority (struct list_elem *, struct list_elem *, void *);
-bool thread_compare_donate_priority (const struct list_elem *, const struct list_elem *, void *);
+
+bool thread_compare_priority (const struct list_elem *, const struct list_elem *, void *);
+bool thread_compare_donate_priority (const struct list_elem *, const struct list_elem *, void *); //modified #3
 void donate_priority (void);
 void remove_with_lock (struct lock *);
 void refresh_priority (void);
 /* ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY */
+
+/* modified #3 */
+void update_load_avg(void);
+void update_recent_cpu(struct thread *t, void *aux);
+void update_priority(struct thread *t, void *aux); 
 
 #endif /* threads/thread.h */
