@@ -58,6 +58,24 @@ sema_init (struct semaphore *sema, unsigned value)
   list_init (&sema->waiters);
 }
 
+/* One semaphore in a list. */
+struct semaphore_elem 
+  {
+    struct list_elem elem;              /* List element. */
+    struct semaphore semaphore;         /* This semaphore. */
+  };
+
+/* Initializes condition variable COND.  A condition variable
+   allows one piece of code to signal a condition and cooperating
+   code to receive the signal and act upon it. */
+void
+cond_init (struct condition *cond)
+{
+  ASSERT (cond != NULL);
+
+  list_init (&cond->waiters);
+}
+
 /* Down or "P" operation on a semaphore.  Waits for SEMA's value
    to become positive and then atomically decrements it.
 
@@ -67,21 +85,23 @@ sema_init (struct semaphore *sema, unsigned value)
    thread will probably turn interrupts back on. */
 void
 //modified #2
-sema_down (struct semaphore *sema) {
-  enum intr_level old_level;
-  struct thread *cur = thread_current ();
-
-  ASSERT (!intr_context ());
-  ASSERT (intr_get_level () == INTR_ON);
-
-  old_level = intr_disable ();
-
-  while (sema->value == 0) {
-    list_insert_ordered(&sema->waiters, &cur->elem, thread_priority_more, NULL); // 💥 priority sorting
-    thread_block();
-  }
-  sema->value--;
-  intr_set_level (old_level);
+cond_wait(struct condition *cond, struct lock *lock) 
+{
+  struct semaphore_elem waiter;
+  
+  ASSERT(cond != NULL);
+  ASSERT(lock != NULL);
+  ASSERT(!intr_context());
+  ASSERT(lock_held_by_current_thread(lock));
+  
+  sema_init(&waiter.semaphore, 0);
+  list_insert_ordered(&cond->waiters, &waiter.elem, sema_priority_more, NULL);
+  
+  lock_release(lock);
+  
+  sema_down(&waiter.semaphore);
+  
+  lock_acquire(lock);
 }
 
 /* Down or "P" operation on a semaphore, but only if the
@@ -133,6 +153,32 @@ sema_up (struct semaphore *sema) {
   }
 
   intr_set_level (old_level);
+}
+
+/* Down or "P" operation on a semaphore.
+   Waits for SEMA's value to become positive, then atomically decrements it.
+   This function may sleep, so it must not be called within an interrupt handler.
+   This function may be called with interrupts disabled, but if it sleeps the next scheduled
+   thread will probably turn interrupts back on.
+*/
+void
+sema_down (struct semaphore *sema) { //modified #2
+  enum intr_level old_level;
+  struct thread *cur = thread_current();
+
+  ASSERT (sema != NULL);
+  /* 반드시 sema_down()을 호출할 때는 인터럽트가 켜져 있어야 함 */
+  ASSERT (!intr_context());
+  // ASSERT (intr_get_level() == INTR_ON);
+
+  old_level = intr_disable();
+  while (sema->value == 0) {
+    /* 우선순위에 따라 대기 리스트에 삽입하는 수정 코드 */
+    list_insert_ordered(&sema->waiters, &cur->elem, thread_priority_more, NULL);
+    thread_block();
+  }
+  sema->value--;
+  intr_set_level(old_level);
 }
 
 static void sema_test_helper (void *sema_);
@@ -278,23 +324,6 @@ lock_held_by_current_thread (const struct lock *lock)
   return lock->holder == thread_current ();
 }
 
-/* One semaphore in a list. */
-struct semaphore_elem 
-  {
-    struct list_elem elem;              /* List element. */
-    struct semaphore semaphore;         /* This semaphore. */
-  };
-
-/* Initializes condition variable COND.  A condition variable
-   allows one piece of code to signal a condition and cooperating
-   code to receive the signal and act upon it. */
-void
-cond_init (struct condition *cond)
-{
-  ASSERT (cond != NULL);
-
-  list_init (&cond->waiters);
-}
 
 /* Atomically releases LOCK and waits for COND to be signaled by
    some other piece of code.  After COND is signaled, LOCK is
@@ -316,32 +345,6 @@ cond_init (struct condition *cond)
    interrupt handler.  This function may be called with
    interrupts disabled, but interrupts will be turned back on if
    we need to sleep. */
-
-   //modified #2
-   void
-   cond_wait(struct condition *cond, struct lock *lock) 
-   {
-     struct semaphore_elem waiter;
-   
-     ASSERT(cond != NULL);
-     ASSERT(lock != NULL);
-     ASSERT(!intr_context());
-     ASSERT(lock_held_by_current_thread(lock));
-   
-     sema_init(&waiter.semaphore, 0);
-     list_insert_ordered(&cond->waiters, &waiter.elem, sema_priority_more, NULL);
-   
-     lock_release(lock);
-   
-  
-     enum intr_level old_level = intr_enable();
-   
-     sema_down(&waiter.semaphore);
-   
-     intr_set_level(old_level);
-   
-     lock_acquire(lock);
-   }
 
 /* If any threads are waiting on COND (protected by LOCK), then
    this function signals one of them to wake up from its wait.
