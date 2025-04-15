@@ -328,13 +328,14 @@ cond_init (struct condition *cond)
 bool 
 compare_sema_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
-  const struct semaphore_elem *sema_a = list_entry(a, struct semaphore_elem, elem);
-  const struct semaphore_elem *sema_b = list_entry(b, struct semaphore_elem, elem);
-
-  const struct thread *thread_a = list_entry(list_front(&sema_a->semaphore.waiters), struct thread, elem);
-  const struct thread *thread_b = list_entry(list_front(&sema_b->semaphore.waiters), struct thread, elem);
-
-  return thread_a->priority > thread_b->priority;
+  struct semaphore_elem *sema_a = list_entry (a, struct semaphore_elem, elem);
+	struct semaphore_elem *sema_b = list_entry (b, struct semaphore_elem, elem);
+  
+	struct list *waiter_sema_a = &(sema_a->semaphore.waiters);
+	struct list *waiter_sema_b = &(sema_b->semaphore.waiters);
+  
+	return list_entry (list_begin (waiter_sema_a), struct thread, elem)->priority
+  > list_entry (list_begin (waiter_sema_b), struct thread, elem)->priority;
 }
 /* ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY */
 

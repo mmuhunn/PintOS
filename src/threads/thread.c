@@ -342,7 +342,8 @@ donate_priority (void)
 {
   struct thread *current = thread_current ();
 
-  for (int depth = 0; depth < 8; depth++){
+  int depth;
+  for (depth = 0; depth < 8; depth++){
     if (!current->waiting_lock) {
       break;
     }
