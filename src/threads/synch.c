@@ -128,7 +128,9 @@ sema_up (struct semaphore *sema)
   sema->value++;
   
   /* ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY */
-  yield_if_preempted ();
+  if (!intr_context()) {
+    yield_if_preempted ();
+  }
   /* ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY ITISYIJY */
   
   intr_set_level (old_level);

@@ -227,12 +227,13 @@ read_command_line (void)
    and returns the first non-option argument. */
 static char **
 parse_options (char **argv) 
-{
+{ 
   for (; *argv != NULL && **argv == '-'; argv++)
-    {
-      char *save_ptr;
-      char *name = strtok_r (*argv, "=", &save_ptr);
-      char *value = strtok_r (NULL, "", &save_ptr);
+  {
+    char *save_ptr;
+    char *name = strtok_r (*argv, "=", &save_ptr);
+    char *value = strtok_r (NULL, "", &save_ptr);
+    printf(">> parsing option: %s\n", name);
       
       if (!strcmp (name, "-h"))
         usage ();

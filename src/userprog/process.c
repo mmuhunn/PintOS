@@ -33,13 +33,25 @@ process_execute (const char *file_name)
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
+  
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  // Extract program name
+  char *fn_copy2 = palloc_get_page(0);
+  if (fn_copy2 == NULL) {
+    palloc_free_page(fn_copy);
+    return TID_ERROR;
+  }
+  strlcpy(fn_copy2, file_name, PGSIZE);
+  char *save_ptr;
+  char *prog_name = strtok_r(fn_copy2, " ", &save_ptr);
+
+  // Create a new thread to execute FILE_NAME
+  tid = thread_create (prog_name, PRI_DEFAULT, start_process, fn_copy);
+  palloc_free_page(fn_copy2);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -51,16 +63,36 @@ static void
 start_process (void *file_name_)
 {
   char *file_name = file_name_;
+  //dhdhdhdhdhd
+  char *token, *save_ptr;
+  char *parse[64]; // handle maximum 64
+  int count = 0;
+  //dhdhdhdhdhdhdhdhdhdhd
   struct intr_frame if_;
   bool success;
+
+  //dh. copy string for strtok_r()
+  char *fn_copy = palloc_get_page(0);
+  if (fn_copy == NULL)
+    thread_exit();
+  strlcpy(fn_copy, file_name, PGSIZE);
+
+  //dh. token save in argv array
+  for (token = strtok_r(fn_copy, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr)){
+    parse[count++] = token;
+  }
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
-
+  printf("Trying to load: %s\n", parse[0]);
+  success = load (parse[0], &if_.eip, &if_.esp);
+  printf("2: returned from load with success = %d\n", success);
+  
+  //dh. Resource release
+  palloc_free_page(fn_copy);
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
@@ -72,9 +104,65 @@ start_process (void *file_name_)
      arguments on the stack in the form of a `struct intr_frame',
      we just point the stack pointer (%esp) to our stack frame
      and jump to it. */
+
+  printf("3: setup_stack and argument_stack will run\n");
+  argument_stack(parse, count, &if_.esp);
+  printf("4: argument stack pushed\n");
+  hex_dump((uintptr_t)if_.esp, if_.esp, 64, true);
+
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
 }
+
+//dhdhdhdhdhdhdhdhdhdhdhdhd
+void
+argument_stack(char *parse[], int count, void **esp)
+{
+  char *arg_addr[64];  // 각 인자의 주소 저장
+
+  // 1. 문자열 복사 (뒤에서 앞으로)
+  int i;
+  for (i = count - 1; i >= 0; i--) {
+    int len = strlen(parse[i]) + 1;
+    *esp -= len;
+    memcpy(*esp, parse[i], len);
+    arg_addr[i] = *esp;  // 인자 시작 주소 저장
+  }
+
+  // 2. word align (4바이트 정렬)
+  uintptr_t esp_val = (uintptr_t)(*esp);
+  int padding = (esp_val % 4 == 0) ? 0 : 4 - (esp_val % 4);
+  if (padding) {
+    *esp -= padding;
+    memset(*esp, 0, padding);
+  }
+
+  // 3. NULL 포인터 추가
+  *esp -= sizeof(char *);
+  memset(*esp, 0, sizeof(char *));
+
+  // 4. 인자 주소 역순으로 푸시
+  int j;
+  for (j = count - 1; j >= 0; j--) {
+    *esp -= sizeof(char *);
+    memcpy(*esp, &arg_addr[j], sizeof(char *));
+  }
+
+  // 5. argv 주소 푸시
+  char **argv_addr = *esp;
+  *esp -= sizeof(char **);
+  memcpy(*esp, &argv_addr, sizeof(char **));
+
+  // 6. argc 푸시
+  *esp -= sizeof(int);
+  memcpy(*esp, &count, sizeof(int));
+
+  // 7. fake return address 푸시
+  *esp -= sizeof(void *);
+  memset(*esp, 0, sizeof(void *));
+}
+
+
 
 /* Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
@@ -87,7 +175,13 @@ start_process (void *file_name_)
    does nothing. */
 int
 process_wait (tid_t child_tid UNUSED) 
-{
+{ 
+  volatile int i;
+  for (i = 0; i < 100000000; i++)
+  {
+
+  }
+
   return -1;
 }
 
@@ -302,16 +396,19 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  printf("[load] about to setup_stack()\n");
+  if (!setup_stack (esp)) {
+    printf("[load] setup_stack() failed!\n");
     goto done;
-
+  }
+  printf("[load] setup_stack() success, esp = %p\n", *esp);
+  
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
-
+  printf("[load] entry point = %p\n", *eip);
+  
   success = true;
-
- done:
-  /* We arrive here whether the load is successful or not. */
+  done:
   file_close (file);
   return success;
 }
