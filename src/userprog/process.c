@@ -17,9 +17,11 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include <stdlib.h>
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+void argument_stack(const char *argv[], int argc, void **esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -29,6 +31,9 @@ tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
+  char *file_name_copy;
+  char *save_ptr;
+  char *cmd_name;
   tid_t tid;
 
   /* Make a copy of FILE_NAME.
@@ -38,10 +43,26 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  //dh. Copy for parsing
+  file_name_copy = malloc(strlen(file_name)+1);
+  if (file_name_copy == NULL) {
+    palloc_free_page(fn_copy);
+    return TID_ERROR;
+  }
+  strlcpy(file_name_copy, file_name, strlen(file_name)+1);
+
+  //dh. extract cmd_name by strtok_r
+  cmd_name = strtok_r(file_name_copy," ", &save_ptr);
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+
+  // dh. Create new kernel thread
+  tid = thread_create (cmd_name, PRI_DEFAULT, start_process, fn_copy);
+  
+  // dh. Failure, memory release.
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+  
+  free(file_name_copy);
   return tid;
 }
 
@@ -54,12 +75,33 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  char *argv[128];
+  int argc = 0;
+  char *token, *save_ptr;
+  char file_name_copy[256];
+  
+  
+  strlcpy(file_name_copy, file_name, sizeof(file_name_copy));
+
+  //dh. Make argv[] by strtok_r
+  for (token = strtok_r(file_name_copy, " ", &save_ptr); token != NULL;
+       token = strtok_r(NULL, " ", &save_ptr)) {
+    argv[argc++] = token;
+  }
+
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
+
+  //dh. file loading
+  success = load (argv[0], &if_.eip, &if_.esp);
+
+  //dh. Construct stack
+  if (success) {
+    argument_stack(argv, argc, &if_.esp);
+  }
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -72,8 +114,55 @@ start_process (void *file_name_)
      arguments on the stack in the form of a `struct intr_frame',
      we just point the stack pointer (%esp) to our stack frame
      and jump to it. */
+
+  hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
+}
+
+void
+argument_stack(const char* argv[], int argc, void **esp){
+  char *argv_addr[128]; //dh. Store stack adresses
+  int total_len = 0;
+
+  //dh. Push each element to stack
+  int i;
+  for (i = argc - 1; i >= 0; i--) {
+    int len = strlen(argv[i]) + 1;
+    *esp -= len;
+    memcpy(*esp, argv[i], len);
+    argv_addr[i] = *esp;
+    total_len += len;
+  }
+
+  //dh. Word alignment
+  int padding = (4 - (total_len % 4)) % 4;
+  *esp -= padding;
+  memset(*esp, 0, padding);
+
+  //dh. NULL sentinel
+  *esp -= 4;
+  *(uint32_t *)(*esp) = 0;
+
+  // dh. argv[i] adresses push
+  int j;
+  for (j = argc - 1; j >= 0; j--) {
+    *esp -= 4;
+    *(uint32_t *)(*esp) = (uint32_t)argv_addr[j];
+  }
+
+  // dh. argv[] start adresses push
+  char **argv_start = *esp;
+  *esp -= 4;
+  *(uint32_t *)(*esp) = (uint32_t)argv_start;
+
+  // dh. argc push
+  *esp -= 4;
+  *(uint32_t *)(*esp) = argc;
+
+  // dh. fake return address
+  *esp -= 4;
+  *(uint32_t *)(*esp) = 0;
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -87,7 +176,9 @@ start_process (void *file_name_)
    does nothing. */
 int
 process_wait (tid_t child_tid UNUSED) 
-{
+{ 
+  volatile int i;
+  for (i = 0; i < 1000000000; i++);
   return -1;
 }
 
@@ -359,6 +450,7 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
      could quite likely panic the kernel by way of null pointer
      assertions in memcpy(), etc. */
   if (phdr->p_vaddr < PGSIZE)
+  // changed from if(phdr->p_vaddr < PGSIZE)
     return false;
 
   /* It's okay. */
