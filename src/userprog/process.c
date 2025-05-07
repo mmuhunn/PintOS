@@ -19,6 +19,7 @@
 #include "threads/vaddr.h"
 #include <stdlib.h>
 
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 void argument_stack(const char *argv[], int argc, void **esp);
@@ -132,13 +133,14 @@ argument_stack(const char* argv[], int argc, void **esp){
     *esp -= len;
     memcpy(*esp, argv[i], len);
     argv_addr[i] = *esp;
-    total_len += len;
   }
 
   //dh. Word alignment
-  int padding = (4 - (total_len % 4)) % 4;
-  *esp -= padding;
-  memset(*esp, 0, padding);
+  uint32_t padding = (uintptr_t)*esp % 4;
+  if (padding != 0) {
+    *esp -= padding;
+    memset(*esp, 0, padding);
+  }
 
   //dh. NULL sentinel
   *esp -= 4;

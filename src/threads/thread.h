@@ -97,6 +97,10 @@ struct thread
 
     struct list_elem allelem;           /* List element for all threads list. */
 
+    struct list fd_list;
+    int next_fd;
+    int exit_code;
+
     //modified by me
     int64_t wakeup_tick;                /* Local tick*/
 
