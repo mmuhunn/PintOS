@@ -22,6 +22,7 @@ int write(int fd, const void *buffer, unsigned size);
 void user_exit(int status);
 int allocate_fd(struct file *file);
 struct file *get_open_file(int fd);
+void check_stack_args(void *esp, int arg_count);
 
 struct file_descriptor
 {
@@ -65,20 +66,32 @@ void check_buffer_range(const void *buffer, size_t size) {
   }
 }
 
+void check_stack_args(void *esp, int arg_count) {
+  int i;
+  for (i = 0; i <= arg_count; i++) {
+    check_user_vaddr((uint32_t *)esp + i);
+  }
+}
+
 static void
 syscall_handler(struct intr_frame *f UNUSED)
 {
-  int *esp = f->esp;
-  printf("[debug] syscall_num=%d\n", *esp);
-  printf("[debug] esp: %p\n", esp);
-  printf("[debug] fd=%d, buffer=%p, size=%u\n", esp[1], (void *)esp[2], (unsigned)esp[3]);
- 
-  int syscall_num = *(int *)(f->esp);
-  printf("[debug] syscall_num=%d, f->esp=%p\n", syscall_num, f->esp);
-  printf("[debug] args: %x %x %x\n", *((uint32_t *)f->esp + 1),
-                                  *((uint32_t *)f->esp + 2),
-                                  *((uint32_t *)f->esp + 3));
+  int syscall_num = *(int *)f->esp;
+  check_user_vaddr(f->esp);  // syscall_num
 
+  printf("[hex_dump near f->esp]\n");
+  hex_dump((uintptr_t)f->esp - 16, f->esp - 16, 64, true);
+
+  printf("[debug] syscall_num=%d\n", syscall_num);
+  printf("[debug] esp = %p\n", f->esp);
+  printf("[debug] args: fd=%d, buffer=%p, size=%u\n",
+        *((int *)f->esp + 1),
+        (void *)*((int *)f->esp + 2),
+        *((unsigned *)f->esp + 3));
+
+  printf("[syscall] esp(32dump): %p\n", f->esp);
+  hex_dump("user esp", f->esp, 32, true);
+  
   switch (syscall_num)
   {
   case SYS_HALT:
@@ -117,16 +130,13 @@ syscall_handler(struct intr_frame *f UNUSED)
     break;
   case SYS_WRITE:
   {
-    check_user_vaddr((int *)f->esp + 1);
-    check_user_vaddr((int *)f->esp + 2);
-    check_user_vaddr((int *)f->esp + 3);
+    check_stack_args(f->esp, 3);  // fd, buffer, size
 
     int fd = *((int *)f->esp + 1);
     void *buffer = (void *)*((int *)f->esp + 2);
     unsigned size = *((unsigned *)f->esp + 3);
 
     check_buffer_range(buffer, size);
-
     f->eax = write(fd, buffer, size);
     break;
   }

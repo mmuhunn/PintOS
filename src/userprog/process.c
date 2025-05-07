@@ -97,6 +97,8 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
 
   //dh. file loading
+  if_.esp = PHYS_BASE;
+  printf("[important]&if_.esp: %p\n", if_.esp);
   success = load (argv[0], &if_.eip, &if_.esp);
 
   //dh. Construct stack
@@ -116,14 +118,23 @@ start_process (void *file_name_)
      we just point the stack pointer (%esp) to our stack frame
      and jump to it. */
 
+  printf("[dbg] final if_.esp = %p\n", if_.esp); 
+
   hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
-  asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
+  asm volatile (
+    "movl %0, %%esp; movl %1, %%eax; jmp intr_exit"
+    :
+    : "g" (&if_), "g" (if_.esp)
+    : "memory"
+  );
   NOT_REACHED ();
 }
 
 void
 argument_stack(const char* argv[], int argc, void **esp){
   char *argv_addr[128]; //dh. Store stack adresses
+  
+  printf("[dbg] --- Start argument_stack ---\n");
   int total_len = 0;
 
   //dh. Push each element to stack
@@ -133,6 +144,10 @@ argument_stack(const char* argv[], int argc, void **esp){
     *esp -= len;
     memcpy(*esp, argv[i], len);
     argv_addr[i] = *esp;
+    argv[i] = *esp;
+
+    printf("[dbg] Pushed argv[%d] ('%s') at %p (len=%d)\n", i, argv[i], *esp, len);
+    hex_dump((uintptr_t)*esp, *esp, len, true);
   }
 
   //dh. Word alignment
@@ -140,31 +155,47 @@ argument_stack(const char* argv[], int argc, void **esp){
   if (padding != 0) {
     *esp -= padding;
     memset(*esp, 0, padding);
+
+    printf("[dbg] Added %d bytes padding\n", padding);
+    hex_dump((uintptr_t)*esp, *esp, padding, true);
   }
 
   //dh. NULL sentinel
   *esp -= 4;
   *(uint32_t *)(*esp) = 0;
+  printf("[dbg] Pushed NULL sentinel at %p\n", *esp);
+  hex_dump((uintptr_t)*esp, *esp, 4, true);
 
   // dh. argv[i] adresses push
   int j;
   for (j = argc - 1; j >= 0; j--) {
     *esp -= 4;
     *(uint32_t *)(*esp) = (uint32_t)argv_addr[j];
+    printf("[dbg] Pushed argv[%d] addr (%p) at %p\n", j, argv_addr[j], *esp);
+    hex_dump((uintptr_t)*esp, *esp, 4, true);
   }
 
   // dh. argv[] start adresses push
   char **argv_start = *esp;
   *esp -= 4;
   *(uint32_t *)(*esp) = (uint32_t)argv_start;
+  printf("[dbg] Pushed argv addr (%p) at %p\n", argv_start, *esp);
+  hex_dump((uintptr_t)*esp, *esp, 4, true);
 
   // dh. argc push
   *esp -= 4;
   *(uint32_t *)(*esp) = argc;
+  printf("[dbg] Pushed argc (%d) at %p\n", argc, *esp);
+  hex_dump((uintptr_t)*esp, *esp, 4, true);
 
   // dh. fake return address
   *esp -= 4;
   *(uint32_t *)(*esp) = 0;
+
+  printf("[dbg] Pushed fake return addr at %p\n", *esp);
+  hex_dump((uintptr_t)*esp, *esp, 4, true);
+
+  printf("[dbg] --- End of argument_stack ---\n");
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -406,6 +437,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
  done:
   /* We arrive here whether the load is successful or not. */
   file_close (file);
+  printf("[load] entry eip = %p, esp = %p\n", *eip, *esp);
   return success;
 }
 

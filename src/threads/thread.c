@@ -642,7 +642,10 @@ init_thread (struct thread *t, const char *name, int priority)
   //modified by me
   t->init_priority = priority;            
   t->waiting_lock = NULL;              
-  list_init(&t->donations); 
+  list_init(&t->donations);
+
+  list_init(&t->fd_list);
+  t->next_fd = 2;  
 
   if (thread_mlfqs) {
     t->nice = 0;

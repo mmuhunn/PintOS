@@ -8,6 +8,12 @@
 void
 test_main (void) 
 {
+  
+  printf(">>> REACHED test_main()\n");
+  void *esp_val;
+  asm("movl %%esp, %0" : "=g"(esp_val));
+  printf("[userprog] current esp: %p\n", esp_val);
+
   int handle, byte_cnt;
 
   CHECK (create ("test.txt", sizeof sample - 1), "create \"test.txt\"");
