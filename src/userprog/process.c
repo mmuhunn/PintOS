@@ -104,12 +104,18 @@ start_process (void *file_name_)
   //dh. Construct stack
   if (success) {
     argument_stack(argv, argc, &if_.esp);
+
+    if (thread_current()->fd_table!=NULL) {
+      thread_current()->fd_table[0] = NULL;
+      thread_current()->fd_table[1] = NULL;
+    }
   }
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
     thread_exit ();
+  
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -332,6 +338,7 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
 bool
 load (const char *file_name, void (**eip) (void), void **esp) 
 {
+
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
   struct file *file = NULL;
@@ -352,6 +359,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
+  printf("[load] Successfully opened file: %s\n", file_name);
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -365,6 +373,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       printf ("load: %s: error loading executable\n", file_name);
       goto done; 
     }
+  printf("[load] ELF entry: 0x%x, phoff: %u, phnum: %u\n", ehdr.e_entry, ehdr.e_phoff, ehdr.e_phnum);
 
   /* Read program headers. */
   file_ofs = ehdr.e_phoff;
@@ -372,12 +381,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
     {
       struct Elf32_Phdr phdr;
 
-      if (file_ofs < 0 || file_ofs > file_length (file))
-        goto done;
+      if (file_ofs < 0 || file_ofs > file_length (file)){
+        printf("[load] Invalid file_ofs: %d (file length = %d)\n", file_ofs, file_length(file));
+        goto done;}
       file_seek (file, file_ofs);
 
-      if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
-        goto done;
+      if (file_read (file, &phdr, sizeof phdr) != sizeof phdr){
+        printf("[load] Failed to read program header %d\n", i);  
+        goto done;}
       file_ofs += sizeof phdr;
       switch (phdr.p_type) 
         {
@@ -390,8 +401,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
           break;
         case PT_DYNAMIC:
         case PT_INTERP:
-        case PT_SHLIB:
+        case PT_SHLIB:{
+          printf("[load] Unsupported segment type: %d\n", phdr.p_type);
           goto done;
+        }
         case PT_LOAD:
           if (validate_segment (&phdr, file)) 
             {
@@ -416,8 +429,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
                   zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
                 }
               if (!load_segment (file, file_page, (void *) mem_page,
-                                 read_bytes, zero_bytes, writable))
+                                 read_bytes, zero_bytes, writable)){
+                printf("[load] Segment %d failed to load.\n", i);
                 goto done;
+              }
             }
           else
             goto done;

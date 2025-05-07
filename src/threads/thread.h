@@ -1,6 +1,8 @@
 #ifndef THREADS_THREAD_H
 #define THREADS_THREAD_H
 
+#define FD_MAX 128
+
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
@@ -100,6 +102,7 @@ struct thread
     struct list fd_list;
     int next_fd;
     int exit_code;
+    struct file *fd_table[FD_MAX]; 
 
     //modified by me
     int64_t wakeup_tick;                /* Local tick*/

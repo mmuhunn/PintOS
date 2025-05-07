@@ -136,8 +136,14 @@ syscall_handler(struct intr_frame *f UNUSED)
     void *buffer = (void *)*((int *)f->esp + 2);
     unsigned size = *((unsigned *)f->esp + 3);
 
-    check_buffer_range(buffer, size);
-    f->eax = write(fd, buffer, size);
+    check_user_vaddr(buffer);
+
+    if (fd == 1) {
+      putbuf(buffer, size);
+      f->eax = size;
+    } else {
+        f->eax = -1; // not implemented yet
+    }
     break;
   }
 
