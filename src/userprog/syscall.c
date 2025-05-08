@@ -15,6 +15,7 @@ bool is_valid_ptr(const void*);
 struct file_descriptor *get_open_file(int fd);
 int wait(tid_t tid);
 void halt(void);
+bool create(const char *file_name, unsigned initial_size);
 
 struct lock fs_lock;
 struct list open_files;
@@ -72,9 +73,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 		case SYS_CREATE:
 		VALIDATE_PTR(p+5);
 		VALIDATE_PTR(*(p+4));
-		acquire_filesys_lock();
-		f->eax = filesys_create(*(p+4),*(p+5));
-		release_filesys_lock();
+		f->eax = create(*(p+4), *(p+5));
 		break;
 
 		case SYS_REMOVE:
@@ -256,6 +255,19 @@ exit(int status)
 	thread_exit();
 }
 
+bool create(const char *file_name, unsigned initial_size) {
+	if (!is_valid_ptr(file_name)) {
+	  exit(-1);
+	}
+  
+	acquire_filesys_lock();
+	bool success = filesys_create(file_name, initial_size);
+	release_filesys_lock();
+  
+	return success;
+  }
+
+  
 bool
 is_valid_ptr(const void *usr_ptr)
 {
