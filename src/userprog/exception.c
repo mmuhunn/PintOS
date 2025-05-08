@@ -4,12 +4,15 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+#include "userprog/pagedir.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
+void exit(int status);
 
 /* Registers handlers for interrupts that can be caused by user
    programs.
@@ -148,6 +151,11 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+
+  if ((void *)fault_addr >= PHYS_BASE ||
+      pagedir_get_page(thread_current()->pagedir, fault_addr) == NULL) {
+      exit(-1);
+   }
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
