@@ -218,7 +218,7 @@ exit(int status)
           struct child *f = list_entry (e, struct child, elem);
           if(f->tid == thread_current()->tid)
           {
-          	f->used = true;
+          	f->has_been_waited = true;
           	f->exit_error = status;
           }
         }

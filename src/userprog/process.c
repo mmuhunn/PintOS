@@ -169,7 +169,7 @@ process_wait (tid_t child_tid)
 
   thread_current()->waitingon = ch->tid;
     
-  if(!ch->used)
+  if(!ch->has_been_waited)
     sema_down(&thread_current()->child_lock);
 
   int temp = ch->exit_error;
