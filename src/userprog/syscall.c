@@ -90,7 +90,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 		case SYS_REMOVE:
 		VALIDATE_PTR(p+1);
 		VALIDATE_PTR(*(p+1));
-		bool remove(const char *file_name);
+		f->eax = remove(*(p+1));
 		break;
 
 		case SYS_OPEN:
