@@ -1,11 +1,22 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "vm/page.h"
+#include "vm/frame.h"
+#include "vm/swap.h"
+#include "filesys/file.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <debug.h>
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
+#include "threads/palloc.h"
+
 
 
 
@@ -128,10 +139,10 @@ kill (struct intr_frame *f)
 static void
 page_fault (struct intr_frame *f) 
 {
-  bool not_present;  /* True: not-present page, false: writing r/o page. */
-  bool write;        /* True: access was write, false: access was read. */
-  bool user;         /* True: access by user, false: access by kernel. */
-  void *fault_addr;  /* Fault address. */
+   bool not_present = (f->error_code & PF_P) == 0;
+   bool write = (f->error_code & PF_W) != 0;
+   bool user = (f->error_code & PF_U) != 0;
+   void *fault_addr;
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -150,20 +161,62 @@ page_fault (struct intr_frame *f)
   page_fault_cnt++;
 
   /* Determine cause. */
-  not_present = (f->error_code & PF_P) == 0;
-  write = (f->error_code & PF_W) != 0;
-  user = (f->error_code & PF_U) != 0;
+  struct thread *t = thread_current();
 
-  if (user) {
-   if ((void *)fault_addr >= PHYS_BASE ||
-       pagedir_get_page(thread_current()->pagedir, fault_addr) == NULL) {
-     exit(-1);
-   }
- }
+  if (not_present) {
+    struct page *p = page_lookup(&t->spt, fault_addr);
 
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
+    // 스택 확장 조건
+    if (p == NULL &&
+        (uint32_t)fault_addr >= (uint32_t)f->esp - 32 &&
+        is_user_vaddr(fault_addr) &&
+        (PHYS_BASE - pg_round_down(fault_addr)) <= (1 << 23)) {
+
+      // 새 페이지 구조체 생성
+      p = malloc(sizeof(struct page));
+      if (!p) exit(-1);
+
+      p->vaddr = pg_round_down(fault_addr);
+      p->writable = true;
+      p->type = VM_ANON; // 스택도 anon으로 관리
+      p->file = NULL;
+
+      if (!page_insert(&t->spt, p)) {
+        free(p);
+        exit(-1);
+      }
+    }
+
+    if (p == NULL) {
+      exit(-1);  // 기존과 동일
+    }
+
+    struct frame *frame = frame_allocate(PAL_USER, p);
+    if (!frame) exit(-1);
+
+    if (p->type == VM_FILE) {
+      file_seek(p->file, p->offset);
+      off_t read = file_read(p->file, frame->kaddr, p->read_bytes);
+      if (read != (off_t)p->read_bytes) {
+        frame_free(frame->kaddr);
+        exit(-1);
+      }
+      memset(frame->kaddr + p->read_bytes, 0, p->zero_bytes);
+    } else if (p->type == VM_ANON) {
+      swap_in(p, frame->kaddr);
+    }
+
+    if (!install_page(p->vaddr, frame->kaddr, p->writable)) {
+      frame_free(frame->kaddr);
+      exit(-1);
+    }
+
+    p->frame = frame;
+    frame->page = p;
+    return;
+  }
+
+  // 나머지는 기존대로 종료
   printf ("Page fault at %p: %s error %s page in %s context.\n",
           fault_addr,
           not_present ? "not present" : "rights violation",
