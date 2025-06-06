@@ -1,4 +1,5 @@
 #include "vm/page.h"
+#include "vm/frame.h" 
 #include "threads/vaddr.h"
 #include "threads/palloc.h"
 #include "threads/malloc.h"
@@ -58,8 +59,10 @@ supplemental_page_table_destroy(struct hash *spt) {
 }
 
 // 메모리 해제 함수
-void
-page_destructor(struct hash_elem *e, void *aux UNUSED) {
+void page_destructor(struct hash_elem *e, void *aux UNUSED) {
   struct page *p = hash_entry(e, struct page, hash_elem);
-  free(p);
+  if (p->frame != NULL) {
+    frame_free(p->frame->kaddr);  // 프레임 해제
+  }
+  free(p);  // 페이지 구조체 해제
 }

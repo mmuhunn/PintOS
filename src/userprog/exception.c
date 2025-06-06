@@ -163,24 +163,38 @@ page_fault (struct intr_frame *f)
   /* Determine cause. */
   struct thread *t = thread_current();
 
-  // 1. 페이지 폴트가 '존재하지 않는(not_present)' 페이지일 때만 처리
   if (not_present) {
-    // 2. SPT에서 해당 페이지 정보 조회
     struct page *p = page_lookup(&t->spt, fault_addr);
+
+    // 스택 확장 조건
+    if (p == NULL &&
+        (uint32_t)fault_addr >= (uint32_t)f->esp - 32 &&
+        is_user_vaddr(fault_addr) &&
+        (PHYS_BASE - pg_round_down(fault_addr)) <= (1 << 23)) {
+
+      // 새 페이지 구조체 생성
+      p = malloc(sizeof(struct page));
+      if (!p) exit(-1);
+
+      p->vaddr = pg_round_down(fault_addr);
+      p->writable = true;
+      p->type = VM_ANON; // 스택도 anon으로 관리
+      p->file = NULL;
+
+      if (!page_insert(&t->spt, p)) {
+        free(p);
+        exit(-1);
+      }
+    }
+
     if (p == NULL) {
-      // stack growth(스택 확장) 관련 로직도 추가할 수 있음
-      exit(-1);
+      exit(-1);  // 기존과 동일
     }
 
-    // 3. 프레임 할당
     struct frame *frame = frame_allocate(PAL_USER, p);
-    if (!frame) {
-      exit(-1);
-    }
+    if (!frame) exit(-1);
 
-    // 4. 파일/스왑/제로 페이지 실제 데이터 올리기
     if (p->type == VM_FILE) {
-      // 파일에서 데이터 로드
       file_seek(p->file, p->offset);
       off_t read = file_read(p->file, frame->kaddr, p->read_bytes);
       if (read != (off_t)p->read_bytes) {
@@ -188,24 +202,18 @@ page_fault (struct intr_frame *f)
         exit(-1);
       }
       memset(frame->kaddr + p->read_bytes, 0, p->zero_bytes);
-    }
-    else if (p->type == VM_ANON) {
-      // 스왑 영역에서 불러오는 경우
+    } else if (p->type == VM_ANON) {
       swap_in(p, frame->kaddr);
     }
-    // (추후: 스택 확장 지원 시 여기도 코드 추가)
 
-    // 5. 페이지 테이블에 매핑 (실제 가상주소 <-> 물리주소 연결)
     if (!install_page(p->vaddr, frame->kaddr, p->writable)) {
       frame_free(frame->kaddr);
       exit(-1);
     }
 
-    // 6. 페이지와 프레임 연결
     p->frame = frame;
     frame->page = p;
-    return; // 성공적으로 처리
-
+    return;
   }
 
   // 나머지는 기존대로 종료

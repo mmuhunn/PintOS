@@ -515,46 +515,42 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
    static bool
-   load_segment (struct file *file, off_t ofs, uint8_t *upage,
-                 uint32_t read_bytes, uint32_t zero_bytes, bool writable)
-   {
-     ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
-     ASSERT (pg_ofs (upage) == 0);
-     ASSERT (ofs % PGSIZE == 0);
+   load_segment(struct file *file, off_t ofs, uint8_t *upage,
+                uint32_t read_bytes, uint32_t zero_bytes, bool writable) {
+     ASSERT((read_bytes + zero_bytes) % PGSIZE == 0);
+     ASSERT(pg_ofs(upage) == 0);
+     ASSERT(ofs % PGSIZE == 0);
    
-     struct thread *t = thread_current();
+     while (read_bytes > 0 || zero_bytes > 0) {
+       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+       size_t page_zero_bytes = PGSIZE - page_read_bytes;
    
-     while (read_bytes > 0 || zero_bytes > 0)
-       {
-         size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
-         size_t page_zero_bytes = PGSIZE - page_read_bytes;
+       struct page *p = malloc(sizeof(struct page));
+       if (!p) return false;
    
-         // 이 페이지에 대한 정보를 SPT에 등록만
-         struct page *p = malloc(sizeof(struct page));
-         if (!p) return false;
+       p->vaddr = upage;
+       p->writable = writable;
+       p->type = VM_FILE;
    
-         p->vaddr = upage;
-         p->writable = writable;
-         p->type = VM_FILE;
-         p->file = file;
-         p->offset = ofs;
-         p->read_bytes = page_read_bytes;
-         p->zero_bytes = page_zero_bytes;
-         p->frame = NULL; // 아직 프레임 없음
+       p->file = file;
+       p->offset = ofs;
+       p->read_bytes = page_read_bytes;
+       p->zero_bytes = page_zero_bytes;
    
-         if (!page_insert(&t->spt, p)) {
-           free(p);
-           return false;
-         }
-   
-         // advance
-         read_bytes -= page_read_bytes;
-         zero_bytes -= page_zero_bytes;
-         upage += PGSIZE;
-         ofs += page_read_bytes;
+       if (!page_insert(&thread_current()->spt, p)) {
+         free(p);
+         return false;
        }
+   
+       // Advance.
+       read_bytes -= page_read_bytes;
+       zero_bytes -= page_zero_bytes;
+       upage += PGSIZE;
+       ofs += page_read_bytes;
+     }
      return true;
    }
+   
    
 
 /* Create a minimal stack by mapping a zeroed page at the top of

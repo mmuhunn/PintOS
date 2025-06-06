@@ -2,6 +2,8 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/malloc.h"
+#include "userprog/pagedir.h"
+#include "vm/swap.h"   
 #include <hash.h>
 #include <debug.h>
 
@@ -27,15 +29,15 @@ void frame_table_init(void) {
     lock_init(&frame_lock);
 }
 
-// 프레임 할당
 struct frame *frame_allocate(enum palloc_flags flags, struct page *page) {
     lock_acquire(&frame_lock);
 
     void *kaddr = palloc_get_page(flags);
     if (!kaddr) {
-        // TODO: 프레임 부족 시 evict 로직 필요 (교체 알고리즘)
-        lock_release(&frame_lock);
-        return NULL;
+        struct frame *evicted = frame_evict();
+        ASSERT(evicted != NULL);
+        kaddr = evicted->kaddr;
+        free(evicted);  // 이전 프레임 구조체는 메모리 해제
     }
 
     struct frame *f = malloc(sizeof(struct frame));
@@ -44,9 +46,9 @@ struct frame *frame_allocate(enum palloc_flags flags, struct page *page) {
         lock_release(&frame_lock);
         return NULL;
     }
+
     f->kaddr = kaddr;
     f->page = page;
-
     hash_insert(&frame_table, &f->hash_elem);
 
     lock_release(&frame_lock);
@@ -67,4 +69,45 @@ void frame_free(void *kaddr) {
         free(f);
     }
     lock_release(&frame_lock);
+}
+
+struct frame *frame_evict(void) {
+    struct hash_iterator i;
+
+    // 2바퀴까지 순회 시도
+    int round;
+    for (round = 0; round < 2; round++) {
+        hash_first(&i, &frame_table);
+
+        while (hash_next(&i)) {
+            struct frame *f = hash_entry(hash_cur(&i), struct frame, hash_elem);
+            struct page *p = f->page;
+
+            if (p == NULL) continue;
+
+            // accessed 비트 확인
+            if (pagedir_is_accessed(thread_current()->pagedir, p->vaddr)) {
+                pagedir_set_accessed(thread_current()->pagedir, p->vaddr, false);
+                continue;
+            }
+
+            // evict 조건 충족
+            if (p->type == VM_ANON) {
+                swap_out(p, f->kaddr);
+            } else if (p->type == VM_FILE) {
+                if (pagedir_is_dirty(thread_current()->pagedir, p->vaddr)) {
+                    // (선택 구현) write-back 필요 시 수행
+                }
+            }
+
+            pagedir_clear_page(thread_current()->pagedir, p->vaddr);
+            p->frame = NULL;
+            f->page = NULL;
+
+            hash_delete(&frame_table, &f->hash_elem);
+            return f;
+        }
+    }
+
+    PANIC("No frame could be evicted after two passes!");
 }
