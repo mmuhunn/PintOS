@@ -24,9 +24,68 @@ static bool frame_less(const struct hash_elem *a, const struct hash_elem *b, voi
 }
 
 // 테이블 초기화
-void frame_table_init(void) {
-    hash_init(&frame_table, frame_hash, frame_less, NULL);
+/* vm/frame.c */
+
+
+static struct list_elem *clock_ptr = NULL;
+
+void frame_init(void) {
+
+    hash_init(&frame_hash, frame_hash_func, frame_less_func, NULL);
+
+    list_init(&frame_list);
+  
     lock_init(&frame_lock);
+ 
+    clock_ptr = NULL;
+    
+    printf("Frame table initialized\n");
+}
+
+void frame_do_free(struct frame_table_entry *fte, bool free_memory) {
+    ASSERT(fte != NULL);
+    
+    lock_acquire(&frame_lock);
+
+    if (fte->upage != NULL && fte->owner != NULL) {
+
+        pagedir_clear_page(fte->owner->pagedir, fte->upage);
+    }
+
+    hash_delete(&frame_hash, &fte->hash_elem);
+    list_remove(&fte->list_elem);
+
+    if (clock_ptr == &fte->list_elem) {
+        clock_ptr = list_next(clock_ptr);
+        if (clock_ptr == list_end(&frame_list)) {
+            clock_ptr = list_begin(&frame_list);
+        }
+    }
+    
+    if (free_memory) {
+
+        palloc_free_page(fte->kpage);
+        free(fte);
+    } else {
+
+        fte->upage = NULL;
+        fte->owner = NULL;
+        fte->pinned = false;
+
+    }
+    
+    lock_release(&frame_lock);
+}
+
+
+void frame_set_pinned(struct frame_table_entry *fte, bool pinned) {
+    ASSERT(fte != NULL);
+    
+    lock_acquire(&frame_lock);
+
+    fte->pinned = pinned;
+    
+    lock_release(&frame_lock);
 }
 
 struct frame *frame_allocate(enum palloc_flags flags, struct page *page) {
@@ -111,3 +170,47 @@ struct frame *frame_evict(void) {
 
     PANIC("No frame could be evicted after two passes!");
 }
+
+
+struct frame_table_entry *pick_frame_to_evict(void) {
+    ASSERT(lock_held_by_current_thread(&frame_lock));
+
+    if (list_empty(&frame_list)) {
+        return NULL;
+    }
+
+    if (clock_ptr == NULL || clock_ptr == list_end(&frame_list)) {
+        clock_ptr = list_begin(&frame_list);
+    }
+
+    int max_iterations = list_size(&frame_list) * 2;  
+    
+    for (int i = 0; i < max_iterations; i++) {
+        struct frame_table_entry *fte = 
+            list_entry(clock_ptr, struct frame_table_entry, list_elem);
+        
+        clock_ptr = list_next(clock_ptr);
+        if (clock_ptr == list_end(&frame_list)) {
+            clock_ptr = list_begin(&frame_list);
+        }
+
+        if (fte->pinned) {
+            continue;  
+        }
+
+        bool accessed = false;
+        if (fte->upage != NULL && fte->owner != NULL) {
+            accessed = pagedir_is_accessed(fte->owner->pagedir, fte->upage);
+        }
+        
+        if (accessed) {
+            pagedir_set_accessed(fte->owner->pagedir, fte->upage, false);
+            continue;  
+        } else {
+            return fte;
+        }
+    }
+
+    return NULL;
+}
+
