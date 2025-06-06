@@ -4,8 +4,10 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <kernel/list.h>
 #include <threads/synch.h>
+#include "lib/kernel/hash.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -108,6 +110,8 @@ typedef int tid_t;
  
      struct semaphore child_lock;
      int waitingon;
+
+     struct hash spt; // project3
  
  #ifdef USERPROG
      /* Owned by userprog/process.c. */

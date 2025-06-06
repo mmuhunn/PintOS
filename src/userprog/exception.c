@@ -1,11 +1,22 @@
 #include "userprog/exception.h"
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "vm/page.h"
+#include "vm/frame.h"
+#include "vm/swap.h"
+#include "filesys/file.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <debug.h>
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
+#include "threads/palloc.h"
+
 
 
 
@@ -128,10 +139,10 @@ kill (struct intr_frame *f)
 static void
 page_fault (struct intr_frame *f) 
 {
-  bool not_present;  /* True: not-present page, false: writing r/o page. */
-  bool write;        /* True: access was write, false: access was read. */
-  bool user;         /* True: access by user, false: access by kernel. */
-  void *fault_addr;  /* Fault address. */
+   bool not_present = (f->error_code & PF_P) == 0;
+   bool write = (f->error_code & PF_W) != 0;
+   bool user = (f->error_code & PF_U) != 0;
+   void *fault_addr;
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -150,20 +161,54 @@ page_fault (struct intr_frame *f)
   page_fault_cnt++;
 
   /* Determine cause. */
-  not_present = (f->error_code & PF_P) == 0;
-  write = (f->error_code & PF_W) != 0;
-  user = (f->error_code & PF_U) != 0;
+  struct thread *t = thread_current();
 
-  if (user) {
-   if ((void *)fault_addr >= PHYS_BASE ||
-       pagedir_get_page(thread_current()->pagedir, fault_addr) == NULL) {
-     exit(-1);
-   }
- }
+  // 1. 페이지 폴트가 '존재하지 않는(not_present)' 페이지일 때만 처리
+  if (not_present) {
+    // 2. SPT에서 해당 페이지 정보 조회
+    struct page *p = page_lookup(&t->spt, fault_addr);
+    if (p == NULL) {
+      // stack growth(스택 확장) 관련 로직도 추가할 수 있음
+      exit(-1);
+    }
 
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
+    // 3. 프레임 할당
+    struct frame *frame = frame_allocate(PAL_USER, p);
+    if (!frame) {
+      exit(-1);
+    }
+
+    // 4. 파일/스왑/제로 페이지 실제 데이터 올리기
+    if (p->type == VM_FILE) {
+      // 파일에서 데이터 로드
+      file_seek(p->file, p->offset);
+      off_t read = file_read(p->file, frame->kaddr, p->read_bytes);
+      if (read != (off_t)p->read_bytes) {
+        frame_free(frame->kaddr);
+        exit(-1);
+      }
+      memset(frame->kaddr + p->read_bytes, 0, p->zero_bytes);
+    }
+    else if (p->type == VM_ANON) {
+      // 스왑 영역에서 불러오는 경우
+      swap_in(p, frame->kaddr);
+    }
+    // (추후: 스택 확장 지원 시 여기도 코드 추가)
+
+    // 5. 페이지 테이블에 매핑 (실제 가상주소 <-> 물리주소 연결)
+    if (!install_page(p->vaddr, frame->kaddr, p->writable)) {
+      frame_free(frame->kaddr);
+      exit(-1);
+    }
+
+    // 6. 페이지와 프레임 연결
+    p->frame = frame;
+    frame->page = p;
+    return; // 성공적으로 처리
+
+  }
+
+  // 나머지는 기존대로 종료
   printf ("Page fault at %p: %s error %s page in %s context.\n",
           fault_addr,
           not_present ? "not present" : "rights violation",
